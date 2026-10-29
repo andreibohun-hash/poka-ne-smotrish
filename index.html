@@ -41,15 +41,15 @@ header button{pointer-events:auto;padding:6px 10px}
 #strip{display:flex;gap:6px;justify-content:center;padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
 .stn{flex:1;max-width:84px;display:flex;flex-direction:column;align-items:center;gap:5px;padding:7px 4px;border-radius:14px;position:relative}
 .stn .ic{font-size:24px;line-height:1}
-.stn .bar{width:78%;height:6px;border-radius:3px;background:rgba(128,128,128,.28);overflow:hidden}
-.stn .bar b{display:block;height:100%;width:calc(var(--p,0) * 100%);background:var(--accent);border-radius:3px}
+.stn .bar{display:flex;gap:3px;width:78%}
+.stn .bar i{flex:1;height:5px;border-radius:3px;background:rgba(128,128,128,.28)}
+.stn.c1 .bar i:nth-child(1), .stn.c2 .bar i:nth-child(-n+2), .stn.c3 .bar i{background:var(--accent)}
+.stn.frz.c1 .bar i:nth-child(1), .stn.frz.c2 .bar i:nth-child(-n+2), .stn.frz.c3 .bar i{background:#7cc7ff}
 .stn.c4{background:var(--ready);animation:pulse .45s ease-in-out infinite alternate}
-.stn.c4 .bar b{background:#fff}
+.stn.c4 .bar i{background:#fff}
 .stn.c5{background:var(--burn)}
-.stn.c5 .bar b{background:#3a1a14}
-.stn.frz .bar b{background:#7cc7ff}
 .stn.done{opacity:.5}
-.stn.done .bar b{background:var(--on)}
+.stn.done .bar i{background:var(--on)}
 .stn.on{box-shadow:inset 0 0 0 3px var(--ink)}
 .stn .badge{position:absolute;top:-7px;right:-3px;font-size:14px;font-weight:900}
 @keyframes pulse{from{transform:scale(1)}to{transform:scale(1.08)}}
@@ -576,8 +576,8 @@ function goto(screen, payload){
   else if (screen === 'help') card.innerHTML = `<h2>Как играть</h2><ul>
       <li>Свайп или тап по краю — повернуться к соседней станции. Тап по иконке внизу — сразу к ней.</li>
       <li>Прибор готовит, только пока ты на него <b>не</b> смотришь. Посмотрел — замер.</li>
-      <li>Кружки у краёв — приборы за спиной, с той стороны, куда к ним ближе. Кольцо заполняется, пока готовится; зелёное и тает — пора, пока не сгорело. Тап по кружку — повернуться к нему.</li>
-      <li>Дзынь, свист, бульканье — тоже знак. Лента внизу дублирует звук.</li>
+      <li>Прибор за спиной зовёт с той стороны, куда к нему ближе: «тик», «буль» — готовится, бледный кружок у края — почти, зелёный — готово, красный — горит. Тап по кружку — повернуться к нему.</li>
+      <li>Сколько осталось, видно только на шкале, когда смотришь. Дзынь, свист, бульканье — тоже знак, лента внизу дублирует звук.</li>
       <li>Тап по готовому — забрать. Не успел — сгорит, придётся заново.</li>
       <li>Хочешь, чтобы что-то подождало, — смотри на него.</li>
       <li>Собери завтрак до будильника. Ничего не сжёг — три звезды.</li></ul>
@@ -626,7 +626,7 @@ function showCoach(html, ms){
 // Обучение 1-го уровня: подсказка по состоянию тостера и взгляду.
 const COACH = {
   look: 'Тостер жарит, только пока ты на него <b>не смотришь</b>.<br>Свайпни вбок.',
-  wait: 'Тикает — жарится! Кольцо у края заполняется.<br>Жди «дзынь» — кружок позеленеет.',
+  wait: 'Тикает — жарится! Чем чаще «тик», тем ближе.<br>Жди «дзынь» — у края загорится зелёный кружок.',
   peek: 'Замер, пока смотришь. Отвернись!',
   back: 'Дзынь! Повернись к тостеру.',
   take: 'Тапни по тостеру — забрать.',
@@ -670,35 +670,23 @@ function hudClock(){
   if (el.textContent !== txt) el.textContent = txt;
   el.classList.toggle('warn', rem < 6);
 }
-// Прогресс станции для ленты и кружков: f — доля 0…1, m — режим. Готовится — f растёт до 1;
-// в окне — f тает от 1 до 0 (столько осталось до «сгорит»); сгорело — 1.
-function progOf(st){
-  if (!APPLIANCES[st.type].stages) return { f: 0, m: 'none' };
-  if (!isActive(st)) return { f: 1, m: 'done' };
-  if (st.burnt) return { f: 1, m: 'burnt' };
-  const S = stageOf(st);
-  if (st.ready) return { f: Math.max(0, Math.min(1, 1 - (st.p - S.cook) / S.win)), m: 'ready' };
-  return { f: Math.max(0, Math.min(1, st.p / S.cook)), m: 'cook' };
-}
-// Лента станций внизу: иконка и полоска — плавно заполняется, пока готовится; зелёная и тает в окне;
-// красная — сгорело; голубая с «⏸» — замер под взглядом. Дублирует звук для тех, кто играет без него;
-// признак не только цветом — бейдж «!», «🔥», «✓», «⏸» (§9).
-let stripKey = '', stripP = [];
+// Лента станций внизу: иконка, три деления «греется — почти» (грубо, как на слух), зелёное «готово»,
+// красное «сгорело»; под взглядом деления голубые с «⏸» — замер. Сколько осталось, лента не говорит:
+// точная шкала только под взглядом. Признак не только цветом — бейдж «!», «🔥», «✓», «⏸» (§9).
+let stripKey = '';
 function buildStrip(){
   $('strip').innerHTML = G.s.st.map((st, i) => `<button class="stn" data-k="${i}" aria-label="${APPLIANCES[st.type].label}">
-    <span class="ic">${APPLIANCES[st.type].icon}</span><span class="bar"><b></b></span><span class="badge"></span></button>`).join('');
-  stripKey = ''; stripP = [];
+    <span class="ic">${APPLIANCES[st.type].icon}</span><span class="bar"><i></i><i></i><i></i></span><span class="badge"></span></button>`).join('');
+  stripKey = '';
 }
 function updateStrip(){
-  const s = G.s, w = watchedIdx(s), els = $('strip').children;
+  const s = G.s, w = watchedIdx(s);
   const parts = s.st.map((st, i) => {
-    const c = cue(s, i), pr = progOf(st), done = pr.m === 'done', frz = i === w && pr.m === 'cook' && !s.over;
-    const p = +pr.f.toFixed(3);
-    if (stripP[i] !== p && els[i]){ stripP[i] = p; els[i].style.setProperty('--p', p); }
+    const c = cue(s, i), done = !!APPLIANCES[st.type].stages && !isActive(st), frz = i === w && c >= 1 && c <= 3 && !s.over;
     return ['stn', i === w ? 'on' : '', done ? 'done' : '', c ? 'c' + c : '', frz ? 'frz' : ''].join(' ') + '|' + (c === 5 ? '🔥' : c === 4 ? '!' : done ? '✓' : frz ? '⏸' : '');
   });
   const key = parts.join(';'); if (key === stripKey) return; stripKey = key;
-  [...els].forEach((b, i) => { const [cls, badge] = parts[i].split('|'); b.className = cls; b.querySelector('.badge').textContent = badge; });
+  [...$('strip').children].forEach((b, i) => { const [cls, badge] = parts[i].split('|'); b.className = cls; b.querySelector('.badge').textContent = badge; });
 }
 $('strip').addEventListener('click', (e) => {
   const b = e.target.closest('.stn'); if (!b || !G.s || G.screen !== 'game') return;
@@ -708,7 +696,9 @@ $('strip').addEventListener('click', (e) => {
 function addFx(f){ f.t0 = performance.now(); G.fx.push(f); if (!f.quiet) log('fx.start', f.name, f.info || ''); }
 function stationX(k){ return W / 2 + offsetOf(G.s, k) * W * CFG.STATION_W; }
 
-// Кружки приборов за спиной: у того края, куда к прибору ближе поворачиваться, ближние сверху.
+// Места приборов за спиной у краёв кадра: у того края, куда к прибору ближе поворачиваться, ближние сверху.
+// Место есть у каждого (оттуда летят слова-звуки), а кружок виден, только когда прибор зовёт:
+// «почти», «готово», «горит» (show). Сколько осталось, кружок не говорит — точная шкала только под взглядом.
 function chipLayout(s){
   const N = s.st.length, w = watchedIdx(s), L = [], R = [], out = [], r = CFG.CHIP_R, gap = r * 2 + 16;
   for (let i = 0; i < N; i++){
@@ -717,7 +707,7 @@ function chipLayout(s){
   }
   for (const [arr, side] of [[L, -1], [R, 1]]){
     arr.sort((a, b) => Math.abs(a.d) - Math.abs(b.d));
-    arr.forEach((it, j) => out.push({ i: it.i, side, x: side < 0 ? r + 16 : W - r - 16, y: H * CFG.CHIP_Y + j * gap }));
+    arr.forEach((it, j) => out.push({ i: it.i, side, show: cue(s, it.i) >= 3, x: side < 0 ? r + 16 : W - r - 16, y: H * CFG.CHIP_Y + j * gap }));
   }
   return out;
 }
@@ -741,10 +731,10 @@ function wordsTick(s){
   for (const ch of G.chips){
     const st = s.st[ch.i], a = st.anim, da = G.wla[ch.i] === undefined ? 0 : a - G.wla[ch.i];
     G.wla[ch.i] = a;
-    const m = progOf(st).m, x = doneX(st);
-    const rate = m === 'ready' ? 1.3 : m === 'burnt' ? 0.8 : x < 0.15 ? 0 : 0.3 + 0.8 * x;
+    const q = cue(s, ch.i), x = doneX(st);
+    const rate = q === 4 ? 1.3 : q === 5 ? 0.8 : x < 0.15 ? 0 : 0.3 + 0.8 * x;
     G.wph[ch.i] = (G.wph[ch.i] || 0) + da * rate;
-    if (G.wph[ch.i] >= 1){ G.wph[ch.i] %= 1; spawnWord(ch.i, m === 'ready' || m === 'burnt'); }
+    if (G.wph[ch.i] >= 1){ G.wph[ch.i] %= 1; spawnWord(ch.i, q >= 4); }
   }
 }
 
@@ -859,7 +849,7 @@ function onUp(e){
   }
   if (e.type === 'pointercancel') return;
   const p = toVirtual(e), side = W * (1 - CFG.STATION_W) / 2;
-  const chip = G.chips.find((ch) => Math.hypot(p.x - ch.x, p.y - ch.y) < CFG.CHIP_R + 10);
+  const chip = G.chips.find((ch) => ch.show && Math.hypot(p.x - ch.x, p.y - ch.y) < CFG.CHIP_R + 10);
   if (chip){ setTarget(G.s, chip.i); log('input', 'look', 'chip k=' + chip.i); return; }
   if (p.x < side) turn(-1); else if (p.x > W - side) turn(1); else tapAct();
 }
@@ -1241,22 +1231,20 @@ function drawStationUI(c, s, i, x){
     c.fillStyle = '#fff'; c.fillRect(px0 + 4, y + 21, 3, 10); c.fillRect(px0 + 9, y + 21, 3, 10);
   }
 }
-// Боковое зрение: кружок на каждый прибор за спиной (см. chipLayout). Кольцо заполняется, пока готовится;
-// в окне кружок зелёный, кольцо тает (столько осталось до «сгорит»), кружок рвётся к краю; сгорело — красный.
+// Кружок зовёт, но не считает (см. chipLayout): «почти» — бледный, поменьше, покачивается по часам прибора;
+// «готово» — зелёный с «!», пульсирует и рвётся к краю; «горит» — красный с «×». Ни кольца, ни таймера.
 function drawChips(c, s, tReal){
   const r = CFG.CHIP_R;
   for (const ch of G.chips){
-    const st = s.st[ch.i], pr = progOf(st), ready = pr.m === 'ready', burnt = pr.m === 'burnt';
-    const beat = Math.abs(Math.sin(tReal * 7)), sc = ready ? 1.1 + 0.1 * beat : 1, nudge = ready ? beat * 5 * ch.side : 0;
+    if (!ch.show) continue;
+    const st = s.st[ch.i], q = cue(s, ch.i), ready = q === 4, burnt = q === 5;
+    const beat = Math.abs(Math.sin(tReal * 7)), sc = ready ? 1.1 + 0.1 * beat : burnt ? 1 : 0.85, nudge = ready ? beat * 5 * ch.side : 0;
     c.save(); c.translate(ch.x + nudge, ch.y); c.scale(sc, sc);
+    if (q === 3){ c.rotate(Math.sin(st.anim * 9) * 0.18); c.globalAlpha = 0.7; }
     c.fillStyle = 'rgba(0,0,0,.2)'; ellipse(c, 0, 3, r + 4, r + 4); c.fill();
     c.fillStyle = burnt ? '#6b221a' : ready ? '#1f6b2c' : '#3a2e28'; ellipse(c, 0, 0, r, r); c.fill();
-    c.lineWidth = 5; c.lineCap = 'round';
-    c.strokeStyle = 'rgba(255,255,255,.22)'; c.beginPath(); c.arc(0, 0, r - 1, 0, Math.PI * 2); c.stroke();
-    if (pr.f > 0.005){
-      c.strokeStyle = burnt ? PAL.burn : ready ? '#8af07f' : '#ffa53a';
-      c.beginPath(); c.arc(0, 0, r - 1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pr.f); c.stroke();
-    }
+    c.lineWidth = 3; c.strokeStyle = burnt ? PAL.burn : ready ? '#8af07f' : 'rgba(255,255,255,.35)';
+    c.beginPath(); c.arc(0, 0, r - 1, 0, Math.PI * 2); c.stroke();
     drawItem(c, st.type, 0, 5, 0.52);
     if (burnt){ c.fillStyle = 'rgba(30,18,10,.55)'; ellipse(c, 0, 0, r - 4, r - 4); c.fill(); }
     if (ready || burnt){
